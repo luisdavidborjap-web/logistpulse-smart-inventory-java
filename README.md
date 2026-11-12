@@ -1,148 +1,108 @@
-# LOGISTPULSE · Smart Inventory (Java)
+# LOGISTPULSE · Smart Inventory — Java (Command + Chain + Strategy)
 
-Prototipo académico de **reserva de inventario inteligente**, construido en Java 17 y con **dos patrones de comportamiento**: **Command** y **Chain of Responsibility**. Basado en la presentación *Patrones de comportamiento en el Smart Inventory de LOGISTPULSE*.
+> **Versión 2.0 · Proyecto académico funcional por consola**. Ampliación del repositorio original `logistpulse-smart-inventory-java`. Basado en las diapositivas de LOGISTPULSE: **Command**, **Chain of Responsibility** y **Strategy**.
 
-> **Alcance:** aplicación de consola con datos en memoria. **No** incluye API REST, interfaz web, PostgreSQL, Docker, autenticación real ni persistencia al reiniciar. Es un proyecto Java independiente de cualquier repositorio LOGISTPULSE anterior.
+LOGISTPULSE permite consultar inventario, reservar y liberar unidades, mantener historial de operaciones y **seleccionar automáticamente un lote** con una estrategia intercambiable. También ofrece **recomendaciones de reposición** con tres algoritmos distintos. Todos los datos son ficticios y permanecen **en memoria** mientras el programa está abierto.
 
-## ¿Qué hace?
+## Funcionalidades
 
-- Consultar inventario por SKU y lote.
-- Reservar stock y liberar reservas mediante objetos `Comando`.
-- Validar en orden: **SKU → stock global reservable → lote → capacidad de preparación**.
-- Evitar reservar lotes **vencidos** o en **cuarentena**.
-- Llevar un **ledger** (historial) de operaciones aceptadas y rechazadas.
-- Evitar duplicados si se reenvía el mismo ID de comando (**idempotencia**, durante la ejecución actual).
-- Compensar una reserva con un comando independiente de liberación.
+- **Command:** `ReservarStockCommand`, `LiberarStockCommand`, `ProcesadorComandos` (auditoría e idempotencia por ID del comando).
+- **Chain of Responsibility:** `ValidarSku` → `ValidarStock` → `ValidarLote` → `ValidarCapacidad`.
+- **Strategy de picking:** `FEFO` (primero en vencer), `FIFO` (primero en llegar) y `LIFO` (último en llegar). Cambia la política en ejecución, general o por SKU.
+- **Strategy de reposición:** `Punto de reorden`, `Min-Max` y `EOQ`. Cambia la política en ejecución, general o por SKU. Son **recomendaciones**, no compras reales.
+- `AUTO` en el campo lote usa Strategy; un ID explícito como `L-200` realiza una reserva manual.
+- Nunca selecciona en modo `AUTO` un lote **vencido**, **en cuarentena** o con unidades insuficientes.
+- Cada reserva ocupa un solo lote (no hay reparto parcial entre varios lotes). Se registra el lote realmente asignado.
 
-## Requisitos
+## Ejecutar directamente en GitHub Codespaces
 
-- **JDK 17 o posterior** (no basta con un JRE).
-- **Visual Studio Code** y extensión **Extension Pack for Java** (recomendado).
-- **Git** para publicar en GitHub.
-- **Apache Maven** (opcional para consola, necesario para `mvn test` con JUnit).
+1. Abre tu repositorio en GitHub y accede a **Code → Codespaces → Open in browser**.
+2. Sube el ZIP de actualización y extráelo **en la raíz del repositorio** (junto a `pom.xml`); consulta [docs/ACTUALIZAR_CODESPACES.md](docs/ACTUALIZAR_CODESPACES.md).
+3. En la terminal de Codespaces ejecuta:
 
-## Ejecutar en Visual Studio Code (opción fácil)
-
-1. Abre en VS Code la **carpeta raíz** de este proyecto (donde está `pom.xml`).
-2. Instala **Extension Pack for Java** si aún no lo tienes.
-3. Abre `src/main/java/ec/edu/logistpulse/App.java`.
-4. Pulsa **Run** arriba de `main(...)` y usa la **Terminal** para escribir opciones. Si el depurador no acepta entrada, abre la terminal integrada y ejecuta `./scripts/ejecutar.ps1` desde PowerShell.
-
-### Ejecutar en PowerShell sin Maven
-
-```powershell
-java -version
-javac -version
-.\scripts\ejecutar.ps1
-```
-
-Si PowerShell bloquea `.ps1`, puedes usar Maven o los comandos Java directos de `docs/GITHUB_PASO_A_PASO.md`. No cambies la política de ejecución del sistema solo para ejecutar el proyecto.
-
-### Pruebas sin Maven
-
-```powershell
-.\scripts\verificar.ps1
-```
-
-### Pruebas con Maven (12 casos JUnit)
-
-```powershell
+```bash
 mvn test
+mvn -q -DskipTests package
+java -cp target/classes ec.edu.logistpulse.App
 ```
 
-La primera vez Maven puede necesitar internet para descargar sus plugins y las dependencias de pruebas.
+La aplicación requiere **JDK 17 o superior** y Maven en el entorno de Codespaces. **No es necesario instalarlos en Windows.** Para un entorno sin Maven, compila con `javac` como describe la guía.
 
-## Demostración sugerida
+## Menú del sistema
 
-1. Opción `1`: examinar lotes `L-100`, `L-200`, `L-201` (cuarentena) y `L-202` (vencido).
-2. Opción `2`: SKU `MED-002`, lote `L-200`, cantidad `3`, solicitante `docente` → **aprobado**.
-3. Opción `2`: mismo SKU, lote `L-201`, cantidad `1` → **rechazado por cuarentena**.
-4. Opción `2`: mismo SKU, lote `L-202`, cantidad `1` → **rechazado por vencimiento**.
-5. Opción `2`: SKU `MED-001`, lote `L-100`, cantidad `6` → **rechazado por capacidad** (quedan 5 espacios).
-6. Opción `4`: copiar el UUID de la reserva aprobada.
-7. Opción `3`: pegar el UUID de la reserva y liberar; la cantidad vuelve al lote y se desocupa la zona de preparación.
-8. Opción `5`: mostrar el ledger de auditoría de todas las decisiones.
+| Opción | Acción |
+|---|---|
+| `1` | Consultar productos y lotes (incluye fecha de recepción y de vencimiento) |
+| `2` | Reservar stock: SKU, lote (`AUTO` o ID), cantidad y solicitante |
+| `3` | Liberar una reserva por UUID |
+| `4` | Consultar reservas y lote asignado |
+| `5` | Consultar ledger de auditoría |
+| `6` | Cambiar selección de lotes: FEFO / FIFO / LIFO (general o por SKU) |
+| `7` | Cambiar reposición: punto de reorden / Min-Max / EOQ (general o por SKU) |
+| `8` | Calcular recomendación de reposición |
+| `0` | Salir |
 
-## Dónde está cada patrón
+## Demostrar FEFO, FIFO y LIFO
 
-| Patrón | Clases | Responsabilidad |
+Con el SKU `MED-002`, escribe **`AUTO`** en el campo lote y solicita **una unidad** con la capacidad de preparación libre. Cada política asigna un lote distinto:
+
+| Política activa | Lote asignado | Criterio |
 |---|---|---|
-| Command | `Comando`, `ReservarStockCommand`, `LiberarStockCommand`, `ProcesadorComandos` | Convertir acciones en objetos, ejecutarlas, aplicar idempotencia y generar auditoría. |
-| Chain of Responsibility | `ManejadorReserva`, `ValidarSku`, `ValidarStock`, `ValidarLote`, `ValidarCapacidad` | Ejecutar comprobaciones independientes y detener la reserva con un motivo claro. |
-| Modelo de dominio | `Producto`, `Lote`, `Reserva`, `Almacen`, `Inventario` | Representar el inventario, las reservas y la capacidad. |
-| Receptor | `ServicioInventario` | Conectar los patrones y actualizar el inventario. |
+| **FEFO** (inicial) | `L-200` | Vence antes: 2027-02-15 |
+| **FIFO** (opción 6 → 2) | `L-203` | Recibido antes: 2026-08-01 |
+| **LIFO** (opción 6 → 3) | `L-204` | Recibido después: 2026-11-01 |
 
-## Diagrama de clases simplificado
+> Para una demostración limpia de cada estrategia, reinicia la aplicación antes de hacer una nueva reserva, o libera reservas anteriores, para no agotar lotes ni capacidad. Selecciona `TODOS` cuando se solicite el alcance de la política.
 
-```mermaid
-classDiagram
-    class Comando {
-       <<interface>>
-       +id() UUID
-       +execute() ResultadoComando
-    }
-    class ReservarStockCommand
-    class LiberarStockCommand
-    class ProcesadorComandos {
-       +ejecutar(Comando) ResultadoComando
-    }
-    class ServicioInventario {
-       +reservar(UUID, SolicitudReserva) UUID
-       +liberar(UUID)
-    }
-    class ManejadorReserva {
-       <<abstract>>
-       +enlazar(ManejadorReserva)
-       +verificar(SolicitudReserva, Inventario, LocalDate)
-    }
-    class ValidarSku
-    class ValidarStock
-    class ValidarLote
-    class ValidarCapacidad
-    Comando <|.. ReservarStockCommand
-    Comando <|.. LiberarStockCommand
-    ProcesadorComandos --> Comando
-    ReservarStockCommand --> ServicioInventario
-    LiberarStockCommand --> ServicioInventario
-    ServicioInventario --> ManejadorReserva
-    ManejadorReserva <|-- ValidarSku
-    ManejadorReserva <|-- ValidarStock
-    ManejadorReserva <|-- ValidarLote
-    ManejadorReserva <|-- ValidarCapacidad
-```
+Para mostrar reposición, selecciona **opción 8** y SKU `TEC-001` (stock inicial 3). Las recomendaciones de ejemplo son:
 
-## Flujo de una reserva
+| Política | Unidades recomendadas |
+|---|---:|
+| Punto de reorden | 5 |
+| Min-Max | 12 |
+| EOQ | 12 |
+
+## Arquitectura
 
 ```mermaid
 flowchart TD
-    A[Usuario solicita reserva] --> B[ReservarStockCommand.execute]
-    B --> C[ServicioInventario]
-    C --> D{SKU válido?}
-    D -- No --> X[Rechazar con motivo]
-    D -- Sí --> E{Stock disponible?}
-    E -- No --> X
-    E -- Sí --> F{Lote válido y suficiente?}
-    F -- No --> X
-    F -- Sí --> G{Capacidad disponible?}
-    G -- No --> X
-    G -- Sí --> H[Crear reserva y actualizar stock]
-    H --> I[Registrar en Ledger]
-    X --> I
+    U[Usuario] --> C[ReservarStockCommand]
+    C --> P[ProcesadorComandos]
+    P --> S[ServicioInventario]
+    S --> CH[Cadena: SKU / Stock / Lote / Capacidad]
+    CH -->|lote = AUTO| ST[PickingPolicy]
+    ST --> F[FEFO / FIFO / LIFO]
+    CH -->|válido| R[Reservar lote y guardar UUID]
+    P --> A[Ledger de auditoría]
+    U --> SR[ServicioReposicion]
+    SR --> RP[ReplenishmentPolicy]
+    RP --> RE[Punto / Min-Max / EOQ]
 ```
 
-## Archivos para entregar
+Los algoritmos están en `src/main/java/ec/edu/logistpulse/estrategia/{picking,reposicion}/`. Las interfaces `PickingPolicy` y `ReplenishmentPolicy` son los contratos Strategy; `ServicioInventario` y `ServicioReposicion` son los **contextos** que escogen la implementación. Para detalles de clases, reglas y limitaciones lee [docs/DISENO_DEL_SISTEMA.md](docs/DISENO_DEL_SISTEMA.md).
 
-- `src/main/java`: código completo.
-- `src/test/java`: pruebas unitarias JUnit.
-- `docs/DISENO_DEL_SISTEMA.md`: justificación técnica, reglas y limitaciones.
-- `docs/GITHUB_PASO_A_PASO.md`: publicación desde VS Code en Windows.
-- `.github/workflows/ci.yml`: ejecuta pruebas automáticamente en GitHub Actions.
+## Verificación
 
-## Extensiones futuras (NO implementadas)
+```bash
+mvn test                # Ejecuta 34 casos JUnit (12 existentes + 22 nuevos)
+mvn -q -DskipTests package
+java -cp target/classes ec.edu.logistpulse.App
+```
 
-- Automatizar selección FEFO/FIFO/LIFO con **Strategy**.
-- Persistir productos, reservas y ledger en PostgreSQL con transacciones y restricciones SQL.
-- Exponer `POST /reservations` con Spring Boot.
-- Integrar `StockChanged`, reposición y PULSEFLEET mediante **Observer**.
+También hay 12 verificaciones rápidas ejecutables sin JUnit en `src/smoke/java/` (6 originales y 6 de Strategy).
 
-Esta primera versión **implementa exactamente dos patrones**, evitando simular que incluye otros patrones aún no programados.
+GitHub Actions ejecuta `mvn -B test` en cada push mediante `.github/workflows/ci.yml`.
+
+## Alcance y limitaciones
+
+- Prototipo **Java de consola**, sin web, REST ni base de datos.
+- Los productos, reservas, el ledger y los cambios de estrategia se **pierden al reiniciar**.
+- Las reservas `AUTO` se hacen desde **un solo lote**, nunca mezclando lotes.
+- La **reposición** muestra una estimación: no registra órdenes de compra ni pronostica demanda a partir de datos reales.
+- No hay autenticación ni protección de concurrencia/atomicidad apta para una implementación productiva.
+
+### Documentación
+
+- [Diseño de sistema, patrones, UML y justificación](docs/DISENO_DEL_SISTEMA.md)
+- [Actualizar tu repositorio desde Codespaces](docs/ACTUALIZAR_CODESPACES.md)
+- [Guía anterior de VS Code y GitHub](docs/GITHUB_PASO_A_PASO.md)

@@ -1,3 +1,5 @@
+> **Actualización 2.0:** si ya utilizas **GitHub Codespaces** y tienes publicado el repositorio, usa primero [ACTUALIZAR_CODESPACES.md](ACTUALIZAR_CODESPACES.md). Este documento se conserva como guía alternativa para instalaciones locales de VS Code. El proyecto ahora implementa **Command, Chain of Responsibility y Strategy**.
+
 # Publicar LOGISTPULSE en GitHub desde Visual Studio Code (Windows)
 
 > **Importante:** esta guía usa **Visual Studio Code (VS Code)**, no Visual Studio 2022. Son programas diferentes. Para proyectos Java, VS Code con Extension Pack for Java suele ser la opción más sencilla.
@@ -112,8 +114,8 @@ git push
 ## F. Verificar antes de entregar
 
 - En el repositorio de GitHub se ven las carpetas `src/main/java` y `src/test/java`.
-- `README.md` explica el negocio y los dos patrones.
-- `mvn test` (si tienes Maven) muestra 12 pruebas correctas.
+- `README.md` explica el negocio y los tres patrones.
+- `mvn test` (si tienes Maven) muestra 34 pruebas correctas.
 - En GitHub Actions el workflow `Java CI` aparece verde (si todas las descargas funcionan).
 - Guarda el enlace real `https://github.com/TU-USUARIO/logistpulse-smart-inventory-java` para tu docente.
 

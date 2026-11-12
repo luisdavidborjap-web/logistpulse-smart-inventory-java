@@ -1,105 +1,170 @@
-# Documento de diseño — LOGISTPULSE Smart Inventory
+# Diseño de sistemas — LOGISTPULSE Smart Inventory 2.0
 
-## 1. Contexto y problema
+## 1. Problema y objetivo
 
-LOGISTPULSE es una propuesta de inventario inteligente orientada al seguimiento de productos por SKU y lote. Su problema principal en este prototipo es impedir **reservas inválidas**, registrar las decisiones y desacoplar el programa que recibe la petición de la lógica de inventario.
+Una empresa necesita reservar productos sin descontar existencias inválidas, justificar los rechazos y elegir qué lote despachar según la política operativa. También necesita simular cuándo reponer existencias, pudiendo cambiar el algoritmo por producto. LOGISTPULSE es un prototipo académico en **Java 17**, con datos ficticios almacenados en memoria.
 
-**Base documental:** presentación adjunta *Patrones de comportamiento en el Smart Inventory de LOGISTPULSE*, especialmente:
+**Base:** presentación del usuario *Patrones de comportamiento en el Smart Inventory de LOGISTPULSE*. Las páginas 2, 3 y 4 describen **Command**, **Chain of Responsibility** y **Strategy**, respectivamente. La diapositiva de Strategy propone tanto picking **FEFO/FIFO/LIFO** como reposición **punto de reorden/EOQ/Min-Max**.
 
-- Diapositiva 1: flujo de `POST /reservations` y patrones del ecosistema completo.
-- Diapositiva 2: **Command**; `Reserve`, `Release`, `Adjust`, `Transfer`, ledger, idempotencia y compensaciones.
-- Diapositiva 3: **Chain of Responsibility**; validaciones `SKU → stock → lote → capacidad`.
+## 2. Arquitectura y responsabilidades
 
-**Selección de alcance:** este repositorio implementa únicamente **Reserve** y **Release** de Command y los cuatro manejadores de Chain. No implementa Adjust/Transfer, API REST ni los otros cuatro patrones de la presentación.
+| Capa | Clases principales | Responsabilidad |
+|---|---|---|
+| Interfaz | `App` | Menú, lectura de solicitudes, cambio de políticas, salida al usuario |
+| Command | `Comando`, `ReservarStockCommand`, `LiberarStockCommand`, `ProcesadorComandos` | Encapsular, ejecutar, deduplicar y auditar operaciones |
+| Chain | `ManejadorReserva`, `ValidarSku`, `ValidarStock`, `ValidarLote`, `ValidarCapacidad` | Validar por pasos, detener la operación cuando se incumple una condición |
+| Strategy — picking | `PickingPolicy`, `FefoPickingPolicy`, `FifoPickingPolicy`, `LifoPickingPolicy` | Decidir qué lote válido usar cuando se solicita `AUTO` |
+| Contexto de picking | `ServicioInventario`, `ContextoReserva` | Seleccionar la política general o configurada para un SKU y coordinar reserva |
+| Strategy — reposición | `ReplenishmentPolicy`, `PuntoReordenPolicy`, `MinMaxPolicy`, `EoqPolicy` | Devolver cantidad sugerida de abastecimiento |
+| Contexto de reposición | `ServicioReposicion` | Mantener/cambiar la política general o por SKU |
+| Dominio y auditoría | `Producto`, `Lote`, `Reserva`, `Inventario`, `Almacen`, `LibroAuditoria` | Estado de negocio y ledger en memoria |
 
-## 2. Objetivos y requisitos
+## 3. Patrón Command
 
-**Objetivo:** permitir reservar y liberar stock con reglas verificables, historial auditable e idempotencia en una demostración de consola.
+**Problema:** el menú no debe decidir cómo modificar inventario o liberar stock, y los reintentos no deben descontar existencias dos veces.
 
-Requisitos funcionales:
+**Solución:** la interfaz `Comando` encapsula una operación; `ProcesadorComandos` la ejecuta, guarda el resultado según UUID y registra aceptación o rechazo. `ReservarStockCommand` y `LiberarStockCommand` delegan en `ServicioInventario`.
 
-1. Listar productos, lotes, unidades disponibles y reservadas.
-2. Crear solicitud con SKU, ID de lote, cantidad y solicitante.
-3. Validar existencia del SKU, cantidad positiva y actor no vacío.
-4. Validar stock reservable sumado sobre lotes habilitados del SKU.
-5. Validar pertenencia, existencia, fecha de vencimiento, cuarentena y disponibilidad del lote solicitado.
-6. Validar espacio en la **zona de preparación**. Este concepto es una regla propuesta para dar sentido operativo a la validación de capacidad; reservar no aumenta el espacio físico usado en bodega.
-7. Si todas pasan, descontar unidades disponibles, incrementar reservadas y ocupar preparación.
-8. Permitir liberación total por UUID de reserva activa; devolver unidades y desocupar preparación.
-9. Registrar en el ledger aprobaciones y rechazos; impedir dos ejecuciones del mismo comando con el mismo ID.
+Un mismo UUID con el mismo contenido devuelve el resultado anterior (**idempotencia en memoria**); la reutilización del UUID con otro contenido se rechaza. Liberar compensa **una reserva activa**, no deshace arbitrariamente cualquier comando anterior.
 
-## 3. Arquitectura de capas
+## 4. Patrón Chain of Responsibility
 
-- `App`: interfaz de consola y **invocador**, no implementa reglas de reserva.
-- `Comando`: interfaz del patrón Command con `execute()`.
-- `ProcesadorComandos`: ejecutor y guardián de la idempotencia; captura resultados y registra el ledger.
-- `ServicioInventario`: **receptor** de los comandos; configura la cadena de validaciones y modifica el dominio.
-- `ManejadorReserva`: interfaz común por herencia para las validaciones.
-- `Inventario`, `Lote`, `Reserva`, `Producto`, `Almacen`: entidades de negocio.
-- `LibroAuditoria`: registro en memoria de resultados.
+```mermaid
+flowchart LR
+    A[Solicitar reserva] --> B{SKU y cantidad}
+    B -->|OK| C{Stock agregado}
+    C -->|OK| D{Lote}
+    D -->|OK| E{Capacidad}
+    E -->|OK| F[Confirmar]
+    B -->|Falla| X[Rechazar con razón]
+    C -->|Falla| X
+    D -->|Falla| X
+    E -->|Falla| X
+```
 
-## 4. Patrón Command
+1. `ValidarSku`: existencia del producto, cantidad positiva, actor no vacío.
+2. `ValidarStock`: stock reservable agregado entre lotes habilitados del SKU.
+3. `ValidarLote`: si el ID es `AUTO`, consulta **Strategy** para resolver el lote; si es explícito, verifica ese lote. En ambos casos exige pertenencia correcta, no vencido, no en cuarentena y unidades suficientes.
+4. `ValidarCapacidad`: verifica espacio libre en la zona de **preparación**.
 
-**Problema:** si cada botón/API modifica directamente el inventario, se duplican reglas, resulta difícil auditar decisiones y reintentos pueden descontar dos veces las unidades.
+Si una validación falla, se lanza `ValidacionException` con motivo y la reserva no modifica el inventario.
 
-**Solución:** cada acción es un objeto:
+## 5. Patrón Strategy — política de picking
 
-- Interfaz `Comando` → `execute()`, ID, tipo, actor y huella.
-- `ReservarStockCommand` → encapsula los datos y solicita una reserva al receptor.
-- `LiberarStockCommand` → revierte el efecto de una reserva activa en una operación nueva.
-- `ProcesadorComandos` → invoca, detecta reintentos por ID, guarda el resultado y registra auditoría.
-- `ServicioInventario` → receptor.
+**Problema:** una sola función de selección con numerosos `if/else` se vuelve compleja cuando una empresa cambia entre prioridades por vencimiento o fecha de llegada.
 
-**Idempotencia:** durante la vida del proceso, reenviar un comando con igual UUID e igual contenido devuelve el resultado original sin repetir cambios ni duplicar el asiento. Reutilizar UUID con otra solicitud se rechaza. Un comando nuevo es una operación diferente.
+**Solución:** `PickingPolicy` define el contrato `seleccionar(Inventario, sku, cantidad, hoy)`; tres implementaciones cambian solamente el **orden de selección**, pero comparten los mismos filtros obligatorios en `SeleccionLotes`:
 
-**Compensación:** `LiberarStockCommand` devuelve la cantidad reservada al lote y libera capacidad; no es un `undo` general de toda la aplicación.
+- **FEFO:** menor `fechaVencimiento` primero, desempata por fecha de recepción e ID.
+- **FIFO:** menor `fechaRecepcion` primero, desempata por vencimiento e ID.
+- **LIFO:** mayor `fechaRecepcion` primero, desempata por vencimiento e ID.
 
-## 5. Patrón Chain of Responsibility
+**Contexto:** `ServicioInventario` guarda una política general (FEFO al iniciar) y un mapa `SKU → PickingPolicy` que permite anular la predeterminada para un producto. El manejador `ValidarLote` usa la estrategia solamente cuando `loteId` es `AUTO`; si el usuario especifica `L-200`, se respeta la elección manual siempre que pase las validaciones.
 
-Cada manejador puede rechazar con `ValidacionException`, propagando una razón explícita:
+**Regla de negocio elegida:** una reserva se asigna a **un solo lote con suficientes unidades**. Si el inventario total tiene existencias suficientes pero están dispersas entre lotes pequeños, `AUTO` puede rechazar la reserva. No implementamos división en múltiples lotes.
 
-1. `ValidarSku`: SKU registrado, cantidad positiva y solicitante.
-2. `ValidarStock`: stock reservable global del SKU (no vencido/no cuarentena) suficiente.
-3. `ValidarLote`: lote existe, pertenece al SKU, no vencido, no cuarentena y tiene unidades.
-4. `ValidarCapacidad`: la zona de preparación admite la cantidad solicitada.
+## 6. Patrón Strategy — política de reposición
 
-La cadena se construye en `ServicioInventario` usando `enlazar(...)`. Si no se lanza excepción, todas pasaron; la reserva se confirma.
+**Contrato:** `ReplenishmentPolicy.recomendar(ParametrosReposicion)` devuelve `RecomendacionReposicion` con política, umbral, cantidad sugerida y explicación. El **contexto** `ServicioReposicion` permite cambiar la política general o por SKU sin cambiar el método `recomendar`.
 
-**Importante:** hay dos controles de cantidades distintos: stock agregado por SKU y stock del lote concreto. Por ejemplo, el SKU puede disponer de 10 unidades en total pero el lote seleccionado solo de 2; una reserva de 3 debe rechazarse en `ValidarLote`.
+### Algoritmos utilizados
 
-## 6. Datos iniciales de demostración
+- **Punto de reorden:** `ROP = demandaDiaria × plazoEntrega + stockSeguridad`. Si `stockActual ≤ ROP`, se sugiere una cantidad igual a la demanda del plazo de entrega. Simplificación académica; no crea orden de compra.
+- **Min-Max:** si `stockActual ≤ ROP` (se usa ROP como mínimo), sugerir `stockMaximo − stockActual`; en otro caso, sugerir 0.
+- **EOQ:** `Q* = sqrt((2 × demandaAnual × costoPorPedido) / costoMantenimientoAnualUnidad)`. Si `stockActual ≤ ROP`, sugerir `ceil(Q*)`; en otro caso 0.
 
-| SKU | Lote | Disponible | Estado | Vencimiento |
-|---|---|---:|---|---|
-| MED-001 | L-100 | 10 | Habilitado | 2099-12-31 |
-| MED-002 | L-200 | 6 | Habilitado | 2099-12-31 |
-| MED-002 | L-201 | 5 | Cuarentena | 2099-12-31 |
-| MED-002 | L-202 | 4 | Vencido | 2020-01-01 |
-| TEC-001 | L-300 | 3 | Habilitado | 2099-12-31 |
+Los cálculos son **simulaciones** basadas en parámetros precargados; no son pronósticos reales ni alteran la cantidad disponible.
 
-Capacidad de preparación: **8 unidades**. Son datos ficticios para demostrar validaciones.
+### Demostración con SKU TEC-001
 
-## 7. Invariantes y consideraciones de diseño
+Parámetros de prueba: 3 unidades, demanda diaria 1, plazo de entrega 5 días, stock de seguridad 2, máximo 15, demanda anual 365, costo por pedido 2, costo anual de tenencia 12. Por tanto `ROP = 1 × 5 + 2 = 7`:
 
-- `Lote.disponible >= 0`, `Lote.reservado >= 0`.
-- `ocupaciónPreparación` entre 0 y `capacidadPreparacion`.
-- La reserva aprobada consume stock del lote exacto; reserva y liberación son operaciones de unidades enteras.
-- No se puede liberar dos veces una reserva activa con IDs de comando diferentes.
-- Fecha de vencimiento igual a hoy se considera válida para esta demostración; el lote está vencido cuando `vencimiento < hoy`.
-- Los identificadores de lote son únicos dentro del inventario.
-- Solo se aplica reserva de lote **seleccionado manualmente**; FEFO no está implementado.
+| Algoritmo | Cálculo | Sugerido |
+|---|---|---:|
+| Punto de reorden | `1 × 5` | 5 |
+| Min-Max | `15 − 3` | 12 |
+| EOQ | `ceil(sqrt(2 × 365 × 2 / 12))` | 12 |
 
-## 8. Limitaciones y cómo evolucionar
+## 7. Diagrama UML simplificado
 
-- **Persistencia:** producto, reservas, resultados idempotentes y auditoría viven solo en memoria y desaparecen al reiniciar.
-- **Atomicidad:** para varias instancias/API y concurrencia real se necesita una transacción de BD que englobe actualizar lote, capacidad, reserva, resultados y auditoría. El `synchronized` del procesador solo protege las llamadas que pasan por esa instancia.
-- **Control de usuarios:** el campo solicitante es descriptivo, no verifica identidades.
-- **Cadena de validación:** sin API, cada usuario selecciona un lote explícitamente; no hay algoritmo de selección automática.
-- **Retención del ledger:** en esta implementación los resultados se almacenan temporalmente, no cumplen requisitos de auditoría regulada.
-- **Fechas:** las comprobaciones se realizan al momento de la reserva, no de forma programada.
+```mermaid
+classDiagram
+    class Comando {
+      <<interface>>
+      +execute() ResultadoComando
+    }
+    class ReservarStockCommand
+    class LiberarStockCommand
+    class ProcesadorComandos
+    class ServicioInventario
+    class ManejadorReserva {
+      <<abstract>>
+      +verificar(ContextoReserva)
+    }
+    class ValidarSku
+    class ValidarStock
+    class ValidarLote
+    class ValidarCapacidad
+    class PickingPolicy {
+      <<interface>>
+      +nombre() String
+      +seleccionar(Inventario, String, int, LocalDate) Lote
+    }
+    class FefoPickingPolicy
+    class FifoPickingPolicy
+    class LifoPickingPolicy
+    class ServicioReposicion
+    class ReplenishmentPolicy {
+      <<interface>>
+      +nombre() String
+      +recomendar(ParametrosReposicion) RecomendacionReposicion
+    }
+    class PuntoReordenPolicy
+    class MinMaxPolicy
+    class EoqPolicy
+    Comando <|.. ReservarStockCommand
+    Comando <|.. LiberarStockCommand
+    ProcesadorComandos --> Comando
+    ReservarStockCommand --> ServicioInventario
+    LiberarStockCommand --> ServicioInventario
+    ServicioInventario --> ManejadorReserva
+    ManejadorReserva <|-- ValidarSku
+    ManejadorReserva <|-- ValidarStock
+    ManejadorReserva <|-- ValidarLote
+    ManejadorReserva <|-- ValidarCapacidad
+    ServicioInventario o--> PickingPolicy
+    PickingPolicy <|.. FefoPickingPolicy
+    PickingPolicy <|.. FifoPickingPolicy
+    PickingPolicy <|.. LifoPickingPolicy
+    ServicioReposicion o--> ReplenishmentPolicy
+    ReplenishmentPolicy <|.. PuntoReordenPolicy
+    ReplenishmentPolicy <|.. MinMaxPolicy
+    ReplenishmentPolicy <|.. EoqPolicy
+```
 
-**Evolución recomendada:** Spring Boot + PostgreSQL + endpoints `GET /inventory`, `POST /reservations` y `POST /reservations/{id}/release`; control transaccional; pruebas de concurrencia; seguridad; y después políticas FEFO/FIFO como Strategy, si el curso permite ampliar patrones.
+## 8. Datos de demostración
 
-## 9. Argumento para la defensa oral
+| SKU | Lote | Disponible inicial | Recepción | Vencimiento | Estado |
+|---|---|---:|---|---|---|
+| MED-001 | L-100 | 10 | 2026-08-15 | 2099-12-31 | Habilitado |
+| MED-002 | L-200 | 6 | 2026-09-10 | 2027-02-15 | Habilitado |
+| MED-002 | L-203 | 8 | 2026-08-01 | 2028-12-31 | Habilitado |
+| MED-002 | L-204 | 7 | 2026-11-01 | 2029-06-30 | Habilitado |
+| MED-002 | L-201 | 5 | 2026-07-01 | 2099-12-31 | Cuarentena |
+| MED-002 | L-202 | 4 | 2019-08-01 | 2020-01-01 | Vencido |
+| TEC-001 | L-300 | 3 | 2026-10-01 | 2099-12-31 | Habilitado |
 
-> Elegimos Command porque convierte cada operación en una entidad ejecutable, repetible de forma segura y auditable; y Chain of Responsibility porque la reserva depende de validaciones independientes que deben ejecutarse en orden y detenerse en el primer incumplimiento. Juntos forman una ruta que permite registrar por qué el sistema aprobó o rechazó una reserva, sin mezclar esas reglas con la interfaz de usuario.
+**Capacidad de preparación: 8 unidades.** Con SKU `MED-002` y lote `AUTO`, para una cantidad de 1: FEFO elige `L-200`, FIFO `L-203`, LIFO `L-204`.
+
+## 9. Reglas, pruebas y limitaciones
+
+- `disponible` y `reservado` nunca pueden ser negativos; ocupación en preparación entre 0 y capacidad.
+- En este ejemplo, un lote se considera vencido cuando su fecha de vencimiento **es anterior** al día actual (en la fecha exacta, aún se acepta).
+- El estado se conserva solo mientras el proceso está en ejecución; al reiniciar se reinicia también la política escogida.
+- El sistema no es un servicio multiusuario concurrente transaccional. En producción se necesitarían controles de BD y bloqueo o concurrencia optimista.
+- El actor no está autenticado; el ledger no es persistente ni regulatorio.
+- `mvn test` ejecuta **34 pruebas JUnit** (12 existentes + 22 añadidas); en `src/smoke/java` hay 12 verificaciones ejecutables manualmente sin JUnit.
+
+## 10. Cómo defender la integración
+
+> **Command** organiza las operaciones en solicitudes ejecutables y auditables; **Chain of Responsibility** verifica cada requisito de la reserva y puede detenerla con una causa precisa; **Strategy** permite sustituir el algoritmo de selección de lote o reposición sin cambiar ni los comandos ni la estructura de las validaciones. Un mismo `ReservarStockCommand` con lote `AUTO` puede asignar distintos lotes según la política activa, conservando las mismas reglas de seguridad.

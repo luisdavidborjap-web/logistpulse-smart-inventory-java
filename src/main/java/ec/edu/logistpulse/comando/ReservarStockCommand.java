@@ -26,6 +26,8 @@ public class ReservarStockCommand implements Comando {
 
     public ResultadoComando execute() {
         UUID reservaId = receptor.reservar(id, solicitud);
-        return new ResultadoComando(id, true, "Reserva aprobada: " + reservaId, reservaId);
+        String lote = receptor.consultarReserva(reservaId).getLoteId();
+        return new ResultadoComando(id, true,
+                "Reserva aprobada: " + reservaId + " | lote asignado: " + lote, reservaId);
     }
 }

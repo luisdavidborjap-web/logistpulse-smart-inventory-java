@@ -1,16 +1,14 @@
 package ec.edu.logistpulse.validacion;
 
-import ec.edu.logistpulse.dominio.Inventario;
-import ec.edu.logistpulse.servicio.SolicitudReserva;
-import java.time.LocalDate;
+import ec.edu.logistpulse.servicio.ContextoReserva;
 
 public class ValidarCapacidad extends ManejadorReserva {
     @Override
-    protected void validar(SolicitudReserva s, Inventario inventario, LocalDate hoy) {
-        int espacio = inventario.almacen().getEspacioLibre();
-        if (espacio < s.cantidad()) {
+    protected void validar(ContextoReserva c) {
+        int espacio = c.inventario().almacen().getEspacioLibre();
+        if (espacio < c.solicitud().cantidad()) {
             throw new ValidacionException("Zona de preparación sin capacidad: libre=" + espacio
-                    + ", solicitado=" + s.cantidad());
+                    + ", solicitado=" + c.solicitud().cantidad());
         }
     }
 }
