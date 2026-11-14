@@ -1,161 +1,112 @@
 package ec.edu.logistpulse;
-
-import ec.edu.logistpulse.auditoria.*;
-import ec.edu.logistpulse.bootstrap.DatosEjemplo;
-import ec.edu.logistpulse.comando.*;
-import ec.edu.logistpulse.dominio.*;
-import ec.edu.logistpulse.estrategia.picking.*;
-import ec.edu.logistpulse.estrategia.reposicion.*;
-import ec.edu.logistpulse.servicio.*;
+import ec.edu.logistpulse.bootstrap.SampleData;
+import ec.edu.logistpulse.command.*;
+import ec.edu.logistpulse.domain.*;
+import ec.edu.logistpulse.strategy.picking.*;
+import ec.edu.logistpulse.strategy.replenishment.*;
 import java.time.LocalDate;
 import java.util.Scanner;
-import java.util.UUID;
-
-/** Demostración de Command + Chain of Responsibility + Strategy. */
+/** Console interface: infrastructure/composition is in SampleData, domain stays separate. */
 public final class App {
-    private App() { }
-
+    private App() {}
     public static void main(String[] args) {
-        Inventario inventario = DatosEjemplo.crear();
-        ServicioInventario servicio = new ServicioInventario(inventario);
-        ServicioReposicion reposicion = new ServicioReposicion();
-        LibroAuditoria auditoria = new LibroAuditoria();
-        ProcesadorComandos procesador = new ProcesadorComandos(auditoria);
-        Scanner sc = new Scanner(System.in);
-
-        System.out.println("=== LOGISTPULSE | Smart Inventory ===");
-        while (true) {
-            System.out.println("\n1. Ver inventario    2. Reservar stock   3. Liberar reserva");
-            System.out.println("4. Ver reservas      5. Ver auditoría    6. Cambiar picking");
-            System.out.println("7. Cambiar reposición 8. Recomendar reposición 0. Salir");
-            System.out.println("Picking: " + servicio.pickingPolicy().nombre()
-                    + " | Reposición: " + reposicion.politica().nombre());
-            System.out.print("Opción: ");
-            if (!sc.hasNextLine()) break;
-            String opcion = sc.nextLine().trim();
+        SampleData.Application app=SampleData.create();
+        Scanner sc=new Scanner(System.in);
+        System.out.println("LOGISTPULSE v3 | Command + Chain + Strategy");
+        System.out.println("Demo actors: ana, mallory (operators), supervisor (supervisor)");
+        while(true) {
+            System.out.println("\n1 Inventory   2 Reserve   3 Release    4 Adjust    5 Transfer");
+            System.out.println("6 Reservations 7 Audit     8 Picking   9 Replenishment policy");
+            System.out.println("10 Recommend  11 Undo command       0 Exit");
+            System.out.println("Picking="+app.picking().defaultPolicy().name()+
+                    " | Replenishment="+app.replenishment().defaultPolicy().name());
+            String op=ask(sc,"Choice");
             try {
-                switch (opcion) {
-                    case "1" -> verInventario(inventario);
-                    case "2" -> reservar(sc, servicio, procesador);
-                    case "3" -> liberar(sc, servicio, procesador);
-                    case "4" -> verReservas(inventario);
-                    case "5" -> verAuditoria(auditoria);
-                    case "6" -> cambiarPicking(sc, servicio);
-                    case "7" -> cambiarReposicion(sc, reposicion);
-                    case "8" -> recomendar(sc, inventario, reposicion);
-                    case "0" -> { System.out.println("Hasta luego."); return; }
-                    default -> System.out.println("Opción no válida.");
+                switch(op) {
+                    case "1" -> inventory(app);
+                    case "2" -> {
+                        String actor=ask(sc,"Actor"); String sku=ask(sc,"SKU");
+                        String wh=ask(sc,"Warehouse [WH-01]"); if(wh.isBlank()) wh="WH-01";
+                        int qty=Integer.parseInt(ask(sc,"Units"));
+                        String lot=ask(sc,"Lot ID or AUTO");
+                        execute(app,new ReserveCommand(app.ids().next("CMD"),actor,sku,wh,qty,lot,app.operations()));
+                    }
+                    case "3" -> {
+                        String actor=ask(sc,"Actor"), reservationId=ask(sc,"Reservation ID");
+                        execute(app,new ReleaseCommand(app.ids().next("CMD"),actor,reservationId,app.operations()));
+                    }
+                    case "4" -> {
+                        String actor=ask(sc,"Supervisor actor"),lot=ask(sc,"Lot ID");
+                        int delta=Integer.parseInt(ask(sc,"Signed delta (+/-)"));
+                        execute(app,new AdjustCommand(app.ids().next("CMD"),actor,lot,delta,app.operations()));
+                    }
+                    case "5" -> {
+                        String actor=ask(sc,"Supervisor actor"),lot=ask(sc,"Source lot ID"),
+                               destination=ask(sc,"Destination warehouse [WH-02]");
+                        if(destination.isBlank()) destination="WH-02";
+                        int qty=Integer.parseInt(ask(sc,"Units"));
+                        execute(app,new TransferCommand(app.ids().next("CMD"),actor,lot,destination,qty,app.operations()));
+                    }
+                    case "6" -> app.inventory().reservations().forEach(r->
+                            System.out.println(r.id()+" owner="+r.owner()+" "+(r.active()?"ACTIVE":"RELEASED")+
+                                    " allocations="+r.allocations()));
+                    case "7" -> app.ledger().entries().forEach(System.out::println);
+                    case "8" -> {
+                        String choice=ask(sc,"Picking 1 FEFO / 2 FIFO / 3 LIFO");
+                        PickingPolicy p=switch(choice) {
+                            case "1"->new FefoPickingPolicy();case "2"->new FifoPickingPolicy();
+                            case "3"->new LifoPickingPolicy();
+                            default->throw new IllegalArgumentException("Unknown picking policy");
+                        };
+                        String sku=ask(sc,"SKU override (blank for all)");
+                        if(sku.isBlank()) app.picking().changeDefault(p);else app.picking().changeForSku(sku,p);
+                        System.out.println("Now using "+p.name());
+                    }
+                    case "9" -> {
+                        String choice=ask(sc,"Replenishment 1 ROP / 2 MinMax / 3 EOQ");
+                        ReplenishmentPolicy p=switch(choice) {
+                            case "1"->new ReorderPointPolicy();case "2"->new MinMaxPolicy();
+                            case "3"->new EoqPolicy();
+                            default->throw new IllegalArgumentException("Unknown replenishment policy");
+                        };
+                        String sku=ask(sc,"SKU override (blank for all)");
+                        if(sku.isBlank()) app.replenishment().changeDefault(p);
+                        else app.replenishment().changeForSku(sku,p);
+                        System.out.println("Now using "+p.name());
+                    }
+                    case "10" -> {
+                        String sku=ask(sc,"SKU");
+                        if(app.inventory().product(sku)==null) throw new IllegalArgumentException("Unknown SKU");
+                        int stock=app.inventory().available(sku,"WH-01",LocalDate.now());
+                        System.out.println(app.replenishment().recommend(SampleData.parameters(sku,stock)));
+                        System.out.println("Recommendation only: no purchase order is created.");
+                    }
+                    case "11" -> {
+                        String commandId=ask(sc,"Command ID to undo (CMD-000001)");
+                        String actor=ask(sc,"Requesting actor");
+                        print(app.invoker().undo(commandId,actor));
+                    }
+                    case "0" -> {return;}
+                    default -> System.out.println("Unknown option");
                 }
-            } catch (IllegalArgumentException ex) {
-                System.out.println("Entrada inválida: " + ex.getMessage());
-            }
+            } catch(IllegalArgumentException ex) {System.out.println("INVALID INPUT: "+ex.getMessage());}
         }
     }
-
-    private static void verInventario(Inventario inv) {
-        System.out.printf("Preparación: %d/%d unidades ocupadas%n",
-                inv.almacen().getOcupacionPreparacion(), inv.almacen().getCapacidadPreparacion());
-        for (Producto p : inv.productos()) {
-            System.out.println(p.sku() + " - " + p.nombre());
-            for (Lote l : inv.lotes()) {
-                if (l.getSku().equals(p.sku())) {
-                    System.out.printf("  Lote=%s | disponible=%d | reservado=%d | recepción=%s | vence=%s | cuarentena=%s%n",
-                            l.getId(), l.getDisponible(), l.getReservado(), l.getFechaRecepcion(),
-                            l.getVencimiento(), l.isEnCuarentena());
-                }
-            }
-        }
+    private static void inventory(SampleData.Application app) {
+        for(Warehouse w:app.inventory().warehouses())
+            System.out.println(w.id()+" staged="+w.staged()+"/"+w.stagingCapacity()+
+                    " | storage="+app.inventory().warehouseOnHand(w.id())+"/"+w.storageCapacity());
+        for(StockLot lot:app.inventory().lots())
+            System.out.println(lot.id()+" sku="+lot.sku()+" wh="+lot.warehouseId()+" available="+
+                    lot.available()+" reserved="+lot.reserved()+" received="+lot.receivedAt()+
+                    " expires="+lot.expiresAt()+" quarantine="+lot.quarantine());
     }
-
-    private static void reservar(Scanner sc, ServicioInventario servicio, ProcesadorComandos procesador) {
-        System.out.print("SKU: "); String sku = sc.nextLine().trim();
-        System.out.print("Lote (ID o AUTO para usar Strategy): "); String lote = sc.nextLine().trim();
-        System.out.print("Cantidad: "); int cantidad = Integer.parseInt(sc.nextLine().trim());
-        System.out.print("Solicitante: "); String actor = sc.nextLine().trim();
-        var solicitud = new SolicitudReserva(sku, lote, cantidad, actor);
-        var resultado = procesador.ejecutar(new ReservarStockCommand(UUID.randomUUID(), solicitud, servicio));
-        imprimirResultado(resultado);
+    private static String ask(Scanner sc,String label) {
+        System.out.print(label+": ");return sc.nextLine().trim();
     }
-
-    private static void cambiarPicking(Scanner sc, ServicioInventario servicio) {
-        System.out.print("Selecciona 1=FEFO  2=FIFO  3=LIFO: ");
-        PickingPolicy politica = switch (sc.nextLine().trim()) {
-            case "1" -> new FefoPickingPolicy();
-            case "2" -> new FifoPickingPolicy();
-            case "3" -> new LifoPickingPolicy();
-            default -> throw new IllegalArgumentException("Política de picking desconocida");
-        };
-        System.out.print("¿Aplicar a TODOS o solo a un SKU (ej. MED-002)?: ");
-        String destino = sc.nextLine().trim();
-        if (destino.equalsIgnoreCase("TODOS") || destino.isBlank()) {
-            servicio.cambiarPickingPolicy(politica);
-            System.out.println("Picking general: " + politica.nombre());
-        } else {
-            servicio.cambiarPickingPolicyParaSku(destino, politica);
-            System.out.println("Picking para " + destino + ": " + politica.nombre());
-        }
-    }
-
-    private static void cambiarReposicion(Scanner sc, ServicioReposicion servicio) {
-        System.out.print("Selecciona 1=Punto de reorden  2=Min-Max  3=EOQ: ");
-        ReplenishmentPolicy politica = switch (sc.nextLine().trim()) {
-            case "1" -> new PuntoReordenPolicy();
-            case "2" -> new MinMaxPolicy();
-            case "3" -> new EoqPolicy();
-            default -> throw new IllegalArgumentException("Política de reposición desconocida");
-        };
-        System.out.print("¿Aplicar a TODOS o solo a un SKU (ej. TEC-001)?: ");
-        String destino = sc.nextLine().trim();
-        if (destino.equalsIgnoreCase("TODOS") || destino.isBlank()) {
-            servicio.cambiarPolitica(politica);
-            System.out.println("Reposición general: " + politica.nombre());
-        } else {
-            servicio.cambiarPoliticaParaSku(destino, politica);
-            System.out.println("Reposición para " + destino + ": " + politica.nombre());
-        }
-    }
-
-    private static void recomendar(Scanner sc, Inventario inventario, ServicioReposicion servicio) {
-        System.out.print("SKU para recomendar reposición (MED-001, MED-002, TEC-001): ");
-        String sku = sc.nextLine().trim();
-        if (inventario.buscarProducto(sku) == null) {
-            throw new IllegalArgumentException("SKU no registrado: " + sku);
-        }
-        int stock = inventario.stockReservable(sku, LocalDate.now());
-        ParametrosReposicion parametros = DatosEjemplo.parametrosReposicion(sku, stock);
-        RecomendacionReposicion r = servicio.recomendar(parametros);
-        System.out.printf("Política=%s | SKU=%s | stock=%d | punto de reorden=%d | sugerido=%d unidades%n",
-                r.politica(), r.sku(), stock, r.puntoReorden(), r.cantidadSugerida());
-        System.out.println(r.necesitaReposicion() ? "SE RECOMIENDA REPONER" : "No se requiere reposición");
-        System.out.println(r.explicacion());
-        System.out.println("Nota: es una simulación y NO registra compras.");
-    }
-
-    private static void liberar(Scanner sc, ServicioInventario servicio, ProcesadorComandos procesador) {
-        System.out.print("ID de reserva: "); UUID reservaId = UUID.fromString(sc.nextLine().trim());
-        System.out.print("Solicitante: "); String actor = sc.nextLine().trim();
-        var resultado = procesador.ejecutar(new LiberarStockCommand(UUID.randomUUID(), reservaId, actor, servicio));
-        imprimirResultado(resultado);
-    }
-
-    private static void verReservas(Inventario inv) {
-        if (inv.reservas().isEmpty()) { System.out.println("Aún no hay reservas."); return; }
-        for (Reserva r : inv.reservas()) {
-            System.out.printf("ID=%s | SKU=%s | lote=%s | unidades=%d | actor=%s | estado=%s%n",
-                    r.getId(), r.getSku(), r.getLoteId(), r.getCantidad(), r.getSolicitante(),
-                    r.isActiva() ? "ACTIVA" : "LIBERADA");
-        }
-    }
-
-    private static void verAuditoria(LibroAuditoria auditoria) {
-        if (auditoria.consultar().isEmpty()) { System.out.println("Aún no hay eventos."); return; }
-        for (EntradaAuditoria e : auditoria.consultar()) {
-            System.out.printf("%s | %s | %s | actor=%s | %s | %s%n", e.fecha(), e.comandoId(),
-                    e.tipo(), e.actor(), e.exitoso() ? "APROBADO" : "RECHAZADO", e.detalle());
-        }
-    }
-
-    private static void imprimirResultado(ResultadoComando resultado) {
-        System.out.println((resultado.exitoso() ? "[OK] " : "[ERROR] ") + resultado.mensaje());
+    private static void execute(SampleData.Application app,Command c) {print(app.invoker().execute(c));}
+    private static void print(CommandResult r) {
+        System.out.println((r.successful()?"OK":"REJECTED")+" | command="+r.commandId()+
+            " | object="+r.objectId()+" | stage="+r.rejectedBy()+" | "+r.message());
     }
 }
