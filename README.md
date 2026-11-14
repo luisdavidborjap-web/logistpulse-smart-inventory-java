@@ -1,24 +1,16 @@
-# LOGISTPULSE · Smart Inventory — Java (Command + Chain + Strategy)
+# LOGISTPULSE Smart Inventory — Java v3.0
 
-> **Versión 2.0 · Proyecto académico funcional por consola**. Ampliación del repositorio original `logistpulse-smart-inventory-java`. Basado en las diapositivas de LOGISTPULSE: **Command**, **Chain of Responsibility** y **Strategy**.
+Proyecto académico de **inventario inteligente** con tres patrones de comportamiento:
+**Command**, **Chain of Responsibility** y **Strategy**.
 
-LOGISTPULSE permite consultar inventario, reservar y liberar unidades, mantener historial de operaciones y **seleccionar automáticamente un lote** con una estrategia intercambiable. También ofrece **recomendaciones de reposición** con tres algoritmos distintos. Todos los datos son ficticios y permanecen **en memoria** mientras el programa está abierto.
+Esta revisión responde específicamente a las observaciones recibidas para **Luis**:
+paquetes en inglés, comandos numerados, `execute()`/`undo()`, cuatro operaciones,
+identidad del solicitante y permisos, distribución entre lotes y mejor separación SOLID.
 
-## Funcionalidades
+## Requisitos y ejecución en GitHub Codespaces
 
-- **Command:** `ReservarStockCommand`, `LiberarStockCommand`, `ProcesadorComandos` (auditoría e idempotencia por ID del comando).
-- **Chain of Responsibility:** `ValidarSku` → `ValidarStock` → `ValidarLote` → `ValidarCapacidad`.
-- **Strategy de picking:** `FEFO` (primero en vencer), `FIFO` (primero en llegar) y `LIFO` (último en llegar). Cambia la política en ejecución, general o por SKU.
-- **Strategy de reposición:** `Punto de reorden`, `Min-Max` y `EOQ`. Cambia la política en ejecución, general o por SKU. Son **recomendaciones**, no compras reales.
-- `AUTO` en el campo lote usa Strategy; un ID explícito como `L-200` realiza una reserva manual.
-- Nunca selecciona en modo `AUTO` un lote **vencido**, **en cuarentena** o con unidades insuficientes.
-- Cada reserva ocupa un solo lote (no hay reparto parcial entre varios lotes). Se registra el lote realmente asignado.
-
-## Ejecutar directamente en GitHub Codespaces
-
-1. Abre tu repositorio en GitHub y accede a **Code → Codespaces → Open in browser**.
-2. Sube el ZIP de actualización y extráelo **en la raíz del repositorio** (junto a `pom.xml`); consulta [docs/ACTUALIZAR_CODESPACES.md](docs/ACTUALIZAR_CODESPACES.md).
-3. En la terminal de Codespaces ejecuta:
+No necesitas instalar Java ni Maven en tu computador: abre el repositorio desde **Code → Codespaces**.
+En la terminal:
 
 ```bash
 mvn test
@@ -26,83 +18,117 @@ mvn -q -DskipTests package
 java -cp target/classes ec.edu.logistpulse.App
 ```
 
-La aplicación requiere **JDK 17 o superior** y Maven en el entorno de Codespaces. **No es necesario instalarlos en Windows.** Para un entorno sin Maven, compila con `javac` como describe la guía.
-
-## Menú del sistema
-
-| Opción | Acción |
-|---|---|
-| `1` | Consultar productos y lotes (incluye fecha de recepción y de vencimiento) |
-| `2` | Reservar stock: SKU, lote (`AUTO` o ID), cantidad y solicitante |
-| `3` | Liberar una reserva por UUID |
-| `4` | Consultar reservas y lote asignado |
-| `5` | Consultar ledger de auditoría |
-| `6` | Cambiar selección de lotes: FEFO / FIFO / LIFO (general o por SKU) |
-| `7` | Cambiar reposición: punto de reorden / Min-Max / EOQ (general o por SKU) |
-| `8` | Calcular recomendación de reposición |
-| `0` | Salir |
-
-## Demostrar FEFO, FIFO y LIFO
-
-Con el SKU `MED-002`, escribe **`AUTO`** en el campo lote y solicita **una unidad** con la capacidad de preparación libre. Cada política asigna un lote distinto:
-
-| Política activa | Lote asignado | Criterio |
-|---|---|---|
-| **FEFO** (inicial) | `L-200` | Vence antes: 2027-02-15 |
-| **FIFO** (opción 6 → 2) | `L-203` | Recibido antes: 2026-08-01 |
-| **LIFO** (opción 6 → 3) | `L-204` | Recibido después: 2026-11-01 |
-
-> Para una demostración limpia de cada estrategia, reinicia la aplicación antes de hacer una nueva reserva, o libera reservas anteriores, para no agotar lotes ni capacidad. Selecciona `TODOS` cuando se solicite el alcance de la política.
-
-Para mostrar reposición, selecciona **opción 8** y SKU `TEC-001` (stock inicial 3). Las recomendaciones de ejemplo son:
-
-| Política | Unidades recomendadas |
-|---|---:|
-| Punto de reorden | 5 |
-| Min-Max | 12 |
-| EOQ | 12 |
-
-## Arquitectura
-
-```mermaid
-flowchart TD
-    U[Usuario] --> C[ReservarStockCommand]
-    C --> P[ProcesadorComandos]
-    P --> S[ServicioInventario]
-    S --> CH[Cadena: SKU / Stock / Lote / Capacidad]
-    CH -->|lote = AUTO| ST[PickingPolicy]
-    ST --> F[FEFO / FIFO / LIFO]
-    CH -->|válido| R[Reservar lote y guardar UUID]
-    P --> A[Ledger de auditoría]
-    U --> SR[ServicioReposicion]
-    SR --> RP[ReplenishmentPolicy]
-    RP --> RE[Punto / Min-Max / EOQ]
-```
-
-Los algoritmos están en `src/main/java/ec/edu/logistpulse/estrategia/{picking,reposicion}/`. Las interfaces `PickingPolicy` y `ReplenishmentPolicy` son los contratos Strategy; `ServicioInventario` y `ServicioReposicion` son los **contextos** que escogen la implementación. Para detalles de clases, reglas y limitaciones lee [docs/DISENO_DEL_SISTEMA.md](docs/DISENO_DEL_SISTEMA.md).
-
-## Verificación
+Prueba rápida adicional sin Maven (solo JDK 17+):
 
 ```bash
-mvn test                # Ejecuta 34 casos JUnit (12 existentes + 22 nuevos)
-mvn -q -DskipTests package
-java -cp target/classes ec.edu.logistpulse.App
+bash scripts/smoke.sh
 ```
 
-También hay 12 verificaciones rápidas ejecutables sin JUnit en `src/smoke/java/` (6 originales y 6 de Strategy).
+## Carpetas en inglés
 
-GitHub Actions ejecuta `mvn -B test` en cada push mediante `.github/workflows/ci.yml`.
+```text
+src/main/java/ec/edu/logistpulse/
+  App.java
+  command/              Command, invoker, Reserve, Release, Adjust, Transfer
+  chain/                ValidationHandler + seis validadores
+  strategy/
+    picking/             PickingPolicy, PickingContext, FEFO/FIFO/LIFO
+    replenishment/       ReplenishmentPolicy, ROP/MinMax/EOQ
+  domain/               Product, Warehouse, StockLot, Reservation, Allocation, Inventory
+  service/              StockOperations, StockService, ReservationService, StockMutationService
+  security/             ActorDirectory, Role, DemoActorDirectory
+  audit/                AuditLedger, AuditEntry, InMemoryAuditLedger
+  bootstrap/            SampleData (composición e inyección)
+src/test/               53 métodos de pruebas JUnit 5
+src/smoke/              36 aserciones de verificación funcional
+.github/workflows/ci.yml
+```
 
-## Alcance y limitaciones
+## Identificación: qué objeto tiene qué número
 
-- Prototipo **Java de consola**, sin web, REST ni base de datos.
-- Los productos, reservas, el ledger y los cambios de estrategia se **pierden al reiniciar**.
-- Las reservas `AUTO` se hacen desde **un solo lote**, nunca mezclando lotes.
-- La **reposición** muestra una estimación: no registra órdenes de compra ni pronostica demanda a partir de datos reales.
-- No hay autenticación ni protección de concurrencia/atomicidad apta para una implementación productiva.
+| Elemento | Ejemplo | Finalidad |
+|---|---|---|
+| **Comando** | `CMD-000001` | Identifica una petición única para idempotencia y auditoría |
+| **Reserva** | `RES-000001` | Identifica la asignación a uno o varios lotes |
+| **Lote** | `LOT-200` | Identifica una partida existente |
+| **Lote por transferencia** | `LOT-T-000001` | Identifica la nueva partida creada en la bodega de destino |
+| **Producto** | `MED-002` | SKU de negocio |
+| **Bodega** | `WH-01`, `WH-02` | Identifica origen/destino y su capacidad |
 
-### Documentación
+El invocador registra: `commandId`, tipo, actor, objeto objetivo, estado,
+validador que rechazó, mensaje y `Instant`. La numeración es **en memoria y se reinicia**
+al cerrar: producción requeriría secuencias persistentes/identificadores globalmente únicos.
 
-- [Diseño de sistema, patrones, UML y justificación](docs/DISENO_DEL_SISTEMA.md)
-- [Actualizar tu repositorio desde Codespaces](docs/ACTUALIZAR_CODESPACES.md)
-- [Guía anterior de VS Code y GitHub](docs/GITHUB_PASO_A_PASO.md)
+## Las cuatro operaciones Command
+
+- `ReserveCommand`: reservar existencias en uno o varios lotes.
+- `ReleaseCommand`: liberar **solo** si el solicitante es propietario o supervisor.
+- `AdjustCommand`: corregir existencias con delta positivo/negativo; **solo supervisor**.
+- `TransferCommand`: trasladar unidades no reservadas entre dos bodegas; **solo supervisor**.
+
+Todos soportan `execute()` y `undo()`. `undo()` es una **compensación condicionada**:
+puede rechazarse si, desde la ejecución original, se reservaron unidades,
+caducaron lotes o ya no hay capacidad suficiente. Nunca fuerza un estado inválido.
+
+`CommandInvoker` memoriza (ID, huella del payload). Si llega el mismo ID con
+una petición distinta, rechaza el conflicto; si es un reintento exacto, **no repite**
+la operación. No es idempotencia durable entre reinicios.
+
+## Chain of Responsibility
+
+El orden, compuesto en `SampleData`, es:
+
+**Identity → Resource/SKU → Authorization → Stock → Lot → Capacity**.
+
+Los cuatro tipos de operación pasan por esta cadena. Cada eslabón retorna
+un `ValidationResult` tipado, que incluye `rejectedBy` y el motivo.
+
+## Strategy — independiente de Chain
+
+`PickingContext` ejecuta **FEFO**, **FIFO** o **LIFO** **antes** de invocar la cadena.
+La estrategia genera un **plan de asignación**, no valida la solicitud ni modifica stock.
+Chain valida ese plan y luego el receptor ejecuta la operación.
+
+Para la selección automática escribe `AUTO`; se puede repartir una cantidad
+entre varios lotes elegibles del **mismo SKU y bodega**. Alternativamente, escribe
+un ID de lote (`LOT-200`) para seleccionar manualmente uno solo.
+
+En paralelo, `ReplenishmentContext` ofrece **Reorder Point**, **Min-Max** y **EOQ**:
+recomienda compras; **no** registra órdenes ni cambia existencias.
+
+## Demostración en el menú
+
+Actores registrados en el ejemplo (solo para pruebas):
+
+| Actor | Rol |
+|---|---|
+| `ana` | OPERATOR |
+| `mallory` | OPERATOR |
+| `supervisor` | SUPERVISOR |
+
+1. Opción **2**: actor `ana`, SKU `MED-002`, bodega `WH-01`, cantidad `7`, lote `AUTO`.
+   Se crea `CMD-000001`, y la reserva `RES-000001` usa `LOT-200` (5) + `LOT-203` (2).
+2. Opción **3**: actor `mallory`, reserva `RES-000001` → rechazo `AUTHORIZATION`.
+3. Opción **3**: actor `ana`, reserva `RES-000001` → liberación aceptada.
+4. Opción **11**: ID del comando de liberación, actor `ana` → intenta restaurarla.
+5. Opción **4** y **5** con actor `supervisor` para demostrar ajustes y transferencias.
+6. Opción **7** para mostrar el historial etiquetado.
+
+Las selecciones FEFO/FIFO/LIFO se modifican desde la opción **8**,
+y las recomendaciones de reposición desde las opciones **9** y **10**.
+
+## Alcance y límites
+
+Es un **prototipo educativo en memoria**, sin base de datos, API, autenticación real,
+transacciones SQL, control distribuido de concurrencia ni persistencia al reiniciar.
+El directorio de roles es de demostración; escribir `supervisor` en la consola
+NO representa autenticación segura en un sistema real. Las operaciones se serializan
+por instancia del receptor, pero no sustituyen transacciones de base de datos.
+
+No se ha agregado un cuarto patrón de diseño. Se han mejorado los tres existentes.
+
+## Más documentación
+
+- [`docs/CORRECCIONES_FEEDBACK_LUIS.md`](docs/CORRECCIONES_FEEDBACK_LUIS.md): cambios por observación del profesor.
+- [`docs/DISENO_DEL_SISTEMA.md`](docs/DISENO_DEL_SISTEMA.md): arquitectura, flujo y SOLID.
+- [`docs/CODESPACES_UPDATE.md`](docs/CODESPACES_UPDATE.md): actualización segura en el repositorio existente.
