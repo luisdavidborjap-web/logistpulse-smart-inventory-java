@@ -10,7 +10,7 @@ public final class ReserveCommand extends AbstractStockCommand {
     }
     public String type() {return "RESERVE";}
     public String targetId() {return sku;}
-    public String fingerprint() {return type()+"|"+actor()+"|"+sku+"|"+warehouseId+"|"+quantity+"|"+lotOrAuto;}
+    public String fingerprint() {return Fingerprint.of(type(),actor(),sku,warehouseId,Integer.toString(quantity),lotOrAuto);}
     public OperationResult execute() {
         OperationResult result=receiver.reserve(actor(),sku,warehouseId,quantity,lotOrAuto);
         if (result.successful()) createdReservationId=result.objectId();

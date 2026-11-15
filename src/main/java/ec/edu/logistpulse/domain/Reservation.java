@@ -5,7 +5,7 @@ public final class Reservation {
     private final String id, owner, sku, warehouseId;
     private final List<Allocation> allocations;
     private final Instant createdAt;
-    private boolean active = true;
+    private ReservationStatus status = ReservationStatus.ACTIVE;
     public Reservation(String id, String owner, String sku, String warehouseId,
                        List<Allocation> allocations, Instant createdAt) {
         if (id == null || id.isBlank() || owner == null || owner.isBlank()
@@ -21,8 +21,10 @@ public final class Reservation {
     public String warehouseId() {return warehouseId;}
     public List<Allocation> allocations() {return allocations;}
     public Instant createdAt() {return createdAt;}
-    public boolean active() {return active;}
+    public boolean active() {return status == ReservationStatus.ACTIVE;}
+    public ReservationStatus status() {return status;}
     public int quantity() {return allocations.stream().mapToInt(Allocation::quantity).sum();}
-    public void markReleased() {if (!active) throw new IllegalStateException("Already released"); active=false;}
-    public void restore() {if (active) throw new IllegalStateException("Already active"); active=true;}
+    public void markReleased() { if (!active()) throw new IllegalStateException("Not active"); status=ReservationStatus.RELEASED; }
+    public void restore() { if (status != ReservationStatus.RELEASED) throw new IllegalStateException("Not released"); status=ReservationStatus.ACTIVE; }
+    public void markShipped() { if (!active()) throw new IllegalStateException("Not active"); status=ReservationStatus.SHIPPED; }
 }

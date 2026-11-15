@@ -17,6 +17,30 @@ public final class StockMutationService {
         this.clock=Objects.requireNonNull(clock); this.ids=Objects.requireNonNull(ids);
         this.actors=Objects.requireNonNull(actors);
     }
+    public OperationResult quarantine(String actor,String lotId) {
+        ValidationResult v=chain.handle(new ValidationContext(OperationRequest.quarantine(actor,lotId),inventory,LocalDate.now(clock)));
+        if (!v.valid()) return OperationResult.fail(v.rejectedBy(),v.reason());
+        inventory.lot(lotId).quarantineLot();
+        return OperationResult.ok(lotId,"Lot moved to quarantine");
+    }
+    public OperationResult reinstate(String actor,String lotId) {
+        ValidationResult v=chain.handle(new ValidationContext(OperationRequest.reinstate(actor,lotId),inventory,LocalDate.now(clock)));
+        if (!v.valid()) return OperationResult.fail(v.rejectedBy(),v.reason());
+        inventory.lot(lotId).reinstate();
+        return OperationResult.ok(lotId,"Lot reinstated after quality inspection");
+    }
+    public OperationResult store(String actor,String lotId) {
+        ValidationResult v=chain.handle(new ValidationContext(OperationRequest.store(actor,lotId),inventory,LocalDate.now(clock)));
+        if (!v.valid()) return OperationResult.fail(v.rejectedBy(),v.reason());
+        inventory.lot(lotId).store();
+        return OperationResult.ok(lotId,"Received lot put away in warehouse");
+    }
+    public OperationResult unstore(String actor,String lotId) {
+        ValidationResult v=chain.handle(new ValidationContext(OperationRequest.unstore(actor,lotId),inventory,LocalDate.now(clock)));
+        if (!v.valid()) return OperationResult.fail(v.rejectedBy(),v.reason());
+        inventory.lot(lotId).undoStore();
+        return OperationResult.ok(lotId,"Put-away safely reverted to RECEIVED");
+    }
     public OperationResult adjust(String actor,String lotId,int delta) {
         OperationRequest request=OperationRequest.adjust(actor,lotId,delta);
         ValidationResult v=chain.handle(new ValidationContext(request,inventory,LocalDate.now(clock)));

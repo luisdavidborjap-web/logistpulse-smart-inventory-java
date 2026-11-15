@@ -7,6 +7,7 @@ import ec.edu.logistpulse.strategy.picking.*;
 import ec.edu.logistpulse.strategy.replenishment.*;
 import ec.edu.logistpulse.audit.*;
 import ec.edu.logistpulse.command.*;
+import ec.edu.logistpulse.observer.*;
 import java.time.*;
 import java.util.Map;
 /** Composition root: all dependencies are injected here, never instantiated in StockService. */
@@ -14,7 +15,9 @@ public final class SampleData {
     private SampleData() {}
     public record Application(Inventory inventory, StockOperations operations, CommandInvoker invoker,
                               PickingContext picking, ReplenishmentContext replenishment,
-                              AuditLedger ledger, IdSequence ids, ActorDirectory actors) {}
+                              AuditLedger ledger, IdSequence ids, ActorDirectory actors,
+                              InventoryEventBus eventBus, InventoryEventJournal eventJournal,
+                              ReplenishmentAlertListener replenishmentAlerts, PulseFleetListener pulseFleet) {}
     public static Application create() {return create(Clock.systemDefaultZone());}
     public static Application create(Clock clock) {
         Inventory inv=new Inventory();
@@ -37,6 +40,9 @@ public final class SampleData {
                 LocalDate.of(2020,1,1),false));
         inv.addLot(new StockLot("LOT-300","TEC-001","WH-01",3,LocalDate.of(2026,10,1),
                 LocalDate.of(2099,12,31),false));
+        // A real RECEIVED lot is kept inaccessible until StoreLotCommand is applied.
+        inv.addLot(StockLot.received("LOT-400","TEC-001","WH-02",2,
+                LocalDate.of(2026,11,10),LocalDate.of(2099,12,31)));
         ActorDirectory actors=new DemoActorDirectory(Map.of("ana",Role.OPERATOR,
                 "mallory",Role.OPERATOR,"supervisor",Role.SUPERVISOR));
         ValidationHandler chain=new IdentityHandler(actors);
@@ -45,12 +51,18 @@ public final class SampleData {
         IdSequence ids=new IdSequence();
         PickingContext picking=new PickingContext(new FefoPickingPolicy());
         ReplenishmentContext replenishment=new ReplenishmentContext(new ReorderPointPolicy());
+        InventoryEventBus bus=new InventoryEventBus();
+        InventoryEventJournal journal=new InventoryEventJournal();
+        ReplenishmentAlertListener alerts=new ReplenishmentAlertListener(inv,replenishment,clock,SampleData::parameters);
+        PulseFleetListener fleet=new PulseFleetListener();
+        bus.subscribe(journal);bus.subscribe(alerts);bus.subscribe(fleet);
         StockOperations operations=new StockService(
             new ReservationService(inv,picking,chain,clock,ids,actors),
-            new StockMutationService(inv,chain,clock,ids,actors));
+            new StockMutationService(inv,chain,clock,ids,actors),
+            new InventoryEventCoordinator(inv,bus,clock));
         AuditLedger ledger=new InMemoryAuditLedger();
         return new Application(inv,operations,new CommandInvoker(ledger,actors,clock),
-                               picking,replenishment,ledger,ids,actors);
+                               picking,replenishment,ledger,ids,actors,bus,journal,alerts,fleet);
     }
     public static ReplenishmentParameters parameters(String sku,int stock) {
         return switch(sku) {
