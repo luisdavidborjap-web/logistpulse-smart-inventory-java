@@ -7,7 +7,7 @@ public final class ReleaseCommand extends AbstractStockCommand {
     }
     public String type() {return "RELEASE";}
     public String targetId() {return reservationId;}
-    public String fingerprint() {return type()+"|"+actor()+"|"+reservationId;}
+    public String fingerprint() {return Fingerprint.of(type(),actor(),reservationId);}
     public OperationResult execute() {return receiver.release(actor(),reservationId);}
     public OperationResult undo(String actor) {return receiver.restore(actor,reservationId);}
 }

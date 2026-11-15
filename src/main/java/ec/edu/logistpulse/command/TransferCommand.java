@@ -11,9 +11,7 @@ public final class TransferCommand extends AbstractStockCommand {
     }
     public String type() {return "TRANSFER";}
     public String targetId() {return sourceLotId;}
-    public String fingerprint() {
-        return type()+"|"+actor()+"|"+sourceLotId+"|"+destinationWarehouseId+"|"+quantity;
-    }
+    public String fingerprint() {return Fingerprint.of(type(),actor(),sourceLotId,destinationWarehouseId,Integer.toString(quantity));}
     public OperationResult execute() {
         OperationResult result=receiver.transfer(actor(),sourceLotId,destinationWarehouseId,quantity);
         if (result.successful()) transferredLotId=result.objectId();

@@ -42,6 +42,17 @@ public final class ReservationService {
         r.markReleased();
         return OperationResult.ok(r.id(),"Released reservation "+r.id());
     }
+    public OperationResult ship(String actor,String reservationId) {
+        OperationRequest request=OperationRequest.ship(actor,reservationId);
+        ValidationResult v=chain.handle(new ValidationContext(request,inventory,LocalDate.now(clock)));
+        if (!v.valid()) return OperationResult.fail(v.rejectedBy(),v.reason());
+        Reservation r=inventory.reservation(reservationId);
+        // The chain validates the complete allocation before any unit is shipped.
+        for (Allocation a:r.allocations()) inventory.lot(a.lotId()).ship(a.quantity());
+        inventory.warehouse(r.warehouseId()).unstage(r.quantity());
+        r.markShipped();
+        return OperationResult.ok(r.id(),"Shipped reservation "+r.id()+" ("+r.quantity()+" units)");
+    }
     public OperationResult restore(String actor,String reservationId) {
         Reservation r=inventory.reservation(reservationId);
         if (r==null || r.active()) return OperationResult.fail("RESOURCE","Reservation not found or already active");

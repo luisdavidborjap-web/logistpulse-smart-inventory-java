@@ -13,6 +13,21 @@ public record OperationRequest(OperationType type, String actor, String sku, Str
     public static OperationRequest release(String actor, String reservationId) {
         return new OperationRequest(OperationType.RELEASE,actor,null,null,null,null,reservationId,0,List.of());
     }
+    public static OperationRequest ship(String actor,String reservationId) {
+        return new OperationRequest(OperationType.SHIP,actor,null,null,null,null,reservationId,0,List.of());
+    }
+    public static OperationRequest quarantine(String actor,String lotId) {
+        return new OperationRequest(OperationType.QUARANTINE,actor,null,lotId,null,null,null,0,List.of());
+    }
+    public static OperationRequest reinstate(String actor,String lotId) {
+        return new OperationRequest(OperationType.REINSTATE,actor,null,lotId,null,null,null,0,List.of());
+    }
+    public static OperationRequest store(String actor,String lotId) {
+        return new OperationRequest(OperationType.STORE,actor,null,lotId,null,null,null,0,List.of());
+    }
+    public static OperationRequest unstore(String actor,String lotId) {
+        return new OperationRequest(OperationType.UNSTORE,actor,null,lotId,null,null,null,0,List.of());
+    }
     public static OperationRequest adjust(String actor, String lotId, int delta) {
         return new OperationRequest(OperationType.ADJUST,actor,null,lotId,null,null,null,delta,List.of());
     }

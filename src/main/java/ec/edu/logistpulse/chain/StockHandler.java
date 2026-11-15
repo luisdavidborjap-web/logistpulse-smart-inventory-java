@@ -35,7 +35,15 @@ public final class StockHandler extends ValidationHandler {
                 if (r.quantity()<=0 || r.quantity()>lot.available())
                     return ValidationResult.reject("STOCK","Insufficient transferable units");
             }
-            case RELEASE -> { }
+            case SHIP -> {
+                Reservation reservation=inv.reservation(r.reservationId());
+                for (Allocation allocation:reservation.allocations()) {
+                    StockLot lot=inv.lot(allocation.lotId());
+                    if (lot==null || lot.reserved()<allocation.quantity())
+                        return ValidationResult.reject("STOCK","Reservation allocation no longer available");
+                }
+            }
+            case RELEASE, QUARANTINE, REINSTATE, STORE, UNSTORE -> { }
         }
         return ValidationResult.allow();
     }

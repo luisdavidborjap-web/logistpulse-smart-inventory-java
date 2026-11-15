@@ -12,12 +12,13 @@ public final class App {
     public static void main(String[] args) {
         SampleData.Application app=SampleData.create();
         Scanner sc=new Scanner(System.in);
-        System.out.println("LOGISTPULSE v3 | Command + Chain + Strategy");
+        System.out.println("LOGISTPULSE Smart Inventory | Command + Chain + Strategy + State + Observer");
         System.out.println("Demo actors: ana, mallory (operators), supervisor (supervisor)");
         while(true) {
             System.out.println("\n1 Inventory   2 Reserve   3 Release    4 Adjust    5 Transfer");
             System.out.println("6 Reservations 7 Audit     8 Picking   9 Replenishment policy");
-            System.out.println("10 Recommend  11 Undo command       0 Exit");
+            System.out.println("10 Recommend  11 Undo command  12 Ship reservation  13 Quarantine lot");
+            System.out.println("14 Reinstate lot  15 Store received lot  16 Events / notifications  0 Exit");
             System.out.println("Picking="+app.picking().defaultPolicy().name()+
                     " | Replenishment="+app.replenishment().defaultPolicy().name());
             String op=ask(sc,"Choice");
@@ -48,7 +49,7 @@ public final class App {
                         execute(app,new TransferCommand(app.ids().next("CMD"),actor,lot,destination,qty,app.operations()));
                     }
                     case "6" -> app.inventory().reservations().forEach(r->
-                            System.out.println(r.id()+" owner="+r.owner()+" "+(r.active()?"ACTIVE":"RELEASED")+
+                            System.out.println(r.id()+" owner="+r.owner()+" "+r.status()+
                                     " allocations="+r.allocations()));
                     case "7" -> app.ledger().entries().forEach(System.out::println);
                     case "8" -> {
@@ -86,6 +87,33 @@ public final class App {
                         String actor=ask(sc,"Requesting actor");
                         print(app.invoker().undo(commandId,actor));
                     }
+                    case "12" -> {
+                        String actor=ask(sc,"Actor"), reservationId=ask(sc,"Reservation ID");
+                        execute(app,new ShipCommand(app.ids().next("CMD"),actor,reservationId,app.operations()));
+                    }
+                    case "13" -> {
+                        String actor=ask(sc,"Supervisor actor"),lot=ask(sc,"Lot ID");
+                        execute(app,new QuarantineLotCommand(app.ids().next("CMD"),actor,lot,app.operations()));
+                    }
+                    case "14" -> {
+                        String actor=ask(sc,"Supervisor actor"),lot=ask(sc,"Lot ID");
+                        execute(app,new ReinstateLotCommand(app.ids().next("CMD"),actor,lot,app.operations()));
+                    }
+                    case "15" -> {
+                        String actor=ask(sc,"Supervisor actor"),lot=ask(sc,"Received lot ID [LOT-400]");
+                        if(lot.isBlank())lot="LOT-400";
+                        execute(app,new StoreLotCommand(app.ids().next("CMD"),actor,lot,app.operations()));
+                    }
+                    case "16" -> {
+                        System.out.println("--- Observer event journal ---");
+                        app.eventJournal().entries().forEach(System.out::println);
+                        System.out.println("--- Replenishment alerts ---");
+                        app.replenishmentAlerts().notifications().forEach(System.out::println);
+                        System.out.println("--- PULSEFLEET simulator ---");
+                        app.pulseFleet().notifications().forEach(System.out::println);
+                        System.out.println("--- Subscriber failures ---");
+                        app.eventBus().deliveryFailures().forEach(System.out::println);
+                    }
                     case "0" -> {return;}
                     default -> System.out.println("Unknown option");
                 }
@@ -99,7 +127,7 @@ public final class App {
         for(StockLot lot:app.inventory().lots())
             System.out.println(lot.id()+" sku="+lot.sku()+" wh="+lot.warehouseId()+" available="+
                     lot.available()+" reserved="+lot.reserved()+" received="+lot.receivedAt()+
-                    " expires="+lot.expiresAt()+" quarantine="+lot.quarantine());
+                    " expires="+lot.expiresAt()+" state="+lot.stateName());
     }
     private static String ask(Scanner sc,String label) {
         System.out.print(label+": ");return sc.nextLine().trim();

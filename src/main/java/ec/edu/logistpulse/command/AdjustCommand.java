@@ -8,7 +8,7 @@ public final class AdjustCommand extends AbstractStockCommand {
     }
     public String type() {return "ADJUST";}
     public String targetId() {return lotId;}
-    public String fingerprint() {return type()+"|"+actor()+"|"+lotId+"|"+delta;}
+    public String fingerprint() {return Fingerprint.of(type(),actor(),lotId,Integer.toString(delta));}
     public OperationResult execute() {return receiver.adjust(actor(),lotId,delta);}
     public OperationResult undo(String actor) {return receiver.adjust(actor,lotId,-delta);}
 }
